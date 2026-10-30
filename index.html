@@ -1,0 +1,434 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dirt Track Racing</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101114;color:white;font-family:Arial,sans-serif;overflow:hidden}
+#game{position:fixed;inset:0}
+canvas{display:block}
+#hud{position:fixed;inset:0;pointer-events:none;display:none}
+.panel{background:#111c;border:1px solid #ffffff30;border-radius:10px;padding:12px 17px;backdrop-filter:blur(8px)}
+#top{position:absolute;top:15px;left:15px;right:15px;display:flex;justify-content:space-between;gap:10px}
+#speed{font-size:32px;font-weight:bold;color:#ffbd45}
+#bottom{position:absolute;bottom:15px;left:15px;display:flex;gap:10px}
+#message{position:absolute;top:100px;left:50%;transform:translateX(-50%);font-size:28px;font-weight:bold;text-shadow:0 2px 5px black}
+#menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(#080b10cc,#080b10eF);z-index:5}
+.menu-card{width:min(520px,92vw);background:#191d25;border:1px solid #ffffff30;border-radius:16px;padding:28px;text-align:center;box-shadow:0 15px 60px #000}
+h1{font-size:clamp(30px,7vw,52px);margin:0 0 8px;color:#ffbd45}
+.subtitle{color:#aaa;margin-bottom:25px}
+select,button{padding:13px;border-radius:7px;border:1px solid #ffffff30;background:#252b36;color:white;font-size:16px;width:100%;margin:6px 0}
+button{background:#c65b20;border:0;font-weight:bold;cursor:pointer}
+button:hover{background:#ed7933}
+.small{font-size:12px;color:#aaa;line-height:1.7}
+#touch{position:fixed;bottom:20px;left:0;right:0;display:none;justify-content:space-between;padding:0 20px;pointer-events:none}
+.touchgroup{display:flex;gap:10px}
+.touchbtn{width:65px;height:65px;border-radius:50%;background:#ffffff40;border:2px solid #fff8;pointer-events:auto;touch-action:none;font-size:22px}
+@media(max-width:700px){#touch{display:flex}#bottom{bottom:100px}#top{font-size:12px}#speed{font-size:23px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="menu">
+ <div class="menu-card">
+  <h1>DIRT TRACK RACING</h1>
+  <div class="subtitle">DIRT OVAL • RACING SIMULATOR</div>
+  <p>Choose your racing division</p>
+  <select id="division">
+   <option value="late">Late Models</option>
+   <option value="modified">Modifieds</option>
+   <option value="sprint">Sprint Cars</option>
+  </select>
+  <p>Race format</p>
+  <select id="format">
+   <option value="quick">Quick Race</option>
+   <option value="career">Career Mode (prototype)</option>
+   <option value="championship">Championship (prototype)</option>
+  </select>
+  <button id="start">START RACING</button>
+  <p class="small">W / ↑ Accelerate · S / ↓ Brake · A / ← Left · D / → Right<br>
+  Space = Handbrake · Controller supported</p>
+ </div>
+</div>
+
+<div id="hud">
+ <div id="top">
+  <div class="panel">
+   <div id="divisionName">LATE MODELS</div>
+   <div id="speed">0 MPH</div>
+  </div>
+  <div class="panel" style="text-align:right">
+   <div id="position">POSITION: 1/6</div>
+   <div id="lap">LAP: 1/8</div>
+  </div>
+ </div>
+ <div id="message">GREEN FLAG!</div>
+ <div id="bottom">
+  <div class="panel">TRACK: BREAD COUNTY SPEEDWAY</div>
+  <div class="panel" id="status">RACE IN PROGRESS</div>
+ </div>
+</div>
+
+<div id="touch">
+ <div class="touchgroup">
+  <button class="touchbtn" data-control="left">◀</button>
+  <button class="touchbtn" data-control="right">▶</button>
+ </div>
+ <div class="touchgroup">
+  <button class="touchbtn" data-control="brake">▼</button>
+  <button class="touchbtn" data-control="gas">▲</button>
+ </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9bb4c6);
+scene.fog = new THREE.Fog(0x9bb4c6,100,260);
+
+const camera = new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,500);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.getElementById('game').appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x554433,2));
+const sunlight=new THREE.DirectionalLight(0xffffff,2.2);
+sunlight.position.set(-45,80,35);
+sunlight.castShadow=true;
+sunlight.shadow.mapSize.set(2048,2048);
+scene.add(sunlight);
+
+const mat=(color,roughness=1)=>new THREE.MeshStandardMaterial({color,roughness});
+const grass=mat(0x456b35);
+const dirt=mat(0x986039);
+const darkDirt=mat(0x684027);
+const concrete=mat(0x777777);
+const white=mat(0xffffff);
+const black=mat(0x171717);
+
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(260,220),grass);
+ground.rotation.x=-Math.PI/2;
+ground.position.y=-.15;
+ground.receiveShadow=true;
+scene.add(ground);
+
+const RX=43,RZ=28,WIDTH=13;
+const N=200;
+
+function trackPoint(t,offset=0){
+ const x=RX*Math.cos(t);
+ const z=RZ*Math.sin(t);
+ const dx=-RX*Math.sin(t),dz=RZ*Math.cos(t);
+ const len=Math.hypot(dx,dz);
+ return new THREE.Vector3(
+  x+dz/len*offset,0,z-dx/len*offset
+ );
+}
+
+function makeOval(inner,outer,material,y=0){
+ const positions=[],indices=[];
+ for(let i=0;i<=N;i++){
+  const t=i/N*Math.PI*2;
+  for(const offset of [inner,outer]){
+   const p=trackPoint(t,offset);
+   positions.push(p.x,y,p.z);
+  }
+ }
+ for(let i=0;i<N;i++){
+  const a=i*2,b=a+1,c=a+2,d=a+3;
+  indices.push(a,b,c,b,d,c);
+ }
+ const geo=new THREE.BufferGeometry();
+ geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+ geo.setIndex(indices);
+ geo.computeVertexNormals();
+ const mesh=new THREE.Mesh(geo,material);
+ mesh.receiveShadow=true;
+ scene.add(mesh);
+ return mesh;
+}
+
+makeOval(-WIDTH/2,WIDTH/2,dirt,.02);
+makeOval(-WIDTH/2-.4,WIDTH/2+.4,darkDirt,-.01);
+makeOval(-WIDTH/2-1.3,-WIDTH/2-.5,concrete,.05);
+makeOval(WIDTH/2+.5,WIDTH/2+1.3,concrete,.05);
+
+const innerGrass=new THREE.Mesh(new THREE.CircleGeometry(1,100),grass);
+innerGrass.scale.set(RX-WIDTH/2,RZ-WIDTH/2,1);
+innerGrass.rotation.x=-Math.PI/2;
+innerGrass.position.y=-.05;
+scene.add(innerGrass);
+
+// Track barriers
+function barrier(offset,height){
+ for(let i=0;i<N;i++){
+  const t=i/N*Math.PI*2;
+  const p=trackPoint(t,offset);
+  const next=trackPoint(t+.02,offset);
+  const angle=Math.atan2(next.x-p.x,next.z-p.z);
+  const block=new THREE.Mesh(new THREE.BoxGeometry(1.5,height,.65),white);
+  block.position.set(p.x,height/2+.05,p.z);
+  block.rotation.y=angle;
+  block.castShadow=true;
+  scene.add(block);
+ }
+}
+barrier(WIDTH/2+1.6,1);
+barrier(-WIDTH/2-1.6,1);
+
+// Trackside scenery
+for(let i=0;i<65;i++){
+ const t=i/65*Math.PI*2;
+ const p=trackPoint(t,WIDTH/2+8+Math.random()*13);
+ const tree=new THREE.Group();
+ const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.25,.4,2,7),mat(0x59402a));
+ trunk.position.y=1;
+ tree.add(trunk);
+ const leaves=new THREE.Mesh(new THREE.ConeGeometry(1.4,4,7),mat(0x24532a));
+ leaves.position.y=3.5;
+ tree.add(leaves);
+ tree.position.set(p.x,0,p.z);
+ scene.add(tree);
+}
+
+// Grandstands
+for(let side of [-1,1]){
+ const stand=new THREE.Mesh(new THREE.BoxGeometry(30,4,5),mat(0x555b65));
+ stand.position.set(side*60,2,0);
+ scene.add(stand);
+ for(let i=0;i<8;i++){
+  const light=new THREE.Mesh(new THREE.BoxGeometry(.3,7,.3),white);
+  light.position.set(side*60,7,i-3.5);
+  scene.add(light);
+ }
+}
+
+// Cars
+function makeCar(type,color){
+ const car=new THREE.Group();
+ const bodyMat=mat(color,.45);
+ const body=new THREE.Mesh(new THREE.BoxGeometry(2.25,.65,4),bodyMat);
+ body.position.y=.85;
+ body.castShadow=true;
+ car.add(body);
+
+ const hood=new THREE.Mesh(new THREE.BoxGeometry(2.05,.32,1.3),bodyMat);
+ hood.position.set(0,1.2,1.1);
+ car.add(hood);
+
+ const roof=new THREE.Mesh(new THREE.BoxGeometry(1.5,.65,1.8),mat(0x222222));
+ roof.position.set(0,1.35,-.35);
+ car.add(roof);
+
+ const windshield=new THREE.Mesh(new THREE.BoxGeometry(1.55,.48,.12),mat(0x426171,.3));
+ windshield.position.set(0,1.45,.55);
+ car.add(windshield);
+
+ for(const x of [-1.15,1.15]){
+  for(const z of [-1.3,1.3]){
+   const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.48,.48,.32,16),black);
+   wheel.rotation.z=Math.PI/2;
+   wheel.position.set(x,.48,z);
+   wheel.castShadow=true;
+   car.add(wheel);
+  }
+ }
+ const spoiler=new THREE.Mesh(new THREE.BoxGeometry(2.5,.18,.65),mat(0x202020));
+ spoiler.position.set(0,1.5,-1.8);
+ car.add(spoiler);
+
+ if(type==='sprint'){
+  const wing=new THREE.Mesh(new THREE.BoxGeometry(3.5,.18,2.5),mat(0xd5d5d5));
+  wing.position.set(0,2,-.65);
+  car.add(wing);
+  const supports=new THREE.Mesh(new THREE.BoxGeometry(.12,.9,.12),black);
+  supports.position.set(0,1.5,-.65);
+  car.add(supports);
+ }
+ return car;
+}
+
+const divisionSettings={
+ late:{name:'LATE MODELS',max:55,accel:18,color:0xe33c2e},
+ modified:{name:'MODIFIEDS',max:50,accel:21,color:0x267bd4},
+ sprint:{name:'SPRINT CARS',max:62,accel:23,color:0xe5bd24}
+};
+
+let settings=divisionSettings.late;
+let player,started=false,speed=0,angle=0,lane=0;
+let lap=1,lastAngle=0;
+const totalLaps=8;
+let raceTime=0;
+let ai=[];
+const keys={};
+const touch={left:false,right:false,gas:false,brake:false};
+
+function setCar(car,t,offset){
+ const p=trackPoint(t,offset);
+ const tangent=trackPoint(t+.001,offset).sub(trackPoint(t-.001,offset)).normalize();
+ car.position.set(p.x,0,p.z);
+ car.rotation.y=Math.atan2(tangent.x,tangent.z);
+}
+
+function startGame(){
+ settings=divisionSettings[document.getElementById('division').value];
+ player=makeCar('player',settings.color);
+ scene.add(player);
+ angle=0;
+ lane=0;
+ speed=0;
+ lap=1;
+ raceTime=0;
+ lastAngle=0;
+ ai=[];
+ const colors=[0x2866d1,0xe2d32c,0xeeeeee,0x23a66d,0xc0399b];
+ for(let i=0;i<5;i++){
+  const car=makeCar('ai',colors[i]);
+  scene.add(car);
+  const t=(Math.PI*2)*(1-i*.035);
+  ai.push({car,t,speed:settings.max*(.66+Math.random()*.15),lane:(i%2===0?-3:3)});
+ }
+ document.getElementById('divisionName').textContent=settings.name;
+ document.getElementById('menu').style.display='none';
+ document.getElementById('hud').style.display='block';
+ document.getElementById('message').textContent='GREEN FLAG!';
+ started=true;
+}
+
+document.getElementById('start').onclick=startGame;
+
+addEventListener('keydown',e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+document.querySelectorAll('.touchbtn').forEach(btn=>{
+ const control=btn.dataset.control;
+ btn.addEventListener('pointerdown',e=>{e.preventDefault();touch[control]=true;});
+ for(const event of ['pointerup','pointerleave','pointercancel'])
+  btn.addEventListener(event,()=>touch[control]=false);
+});
+
+function gamepad(){
+ const pads=navigator.getGamepads?.()||[];
+ const pad=[...pads].find(p=>p&&p.connected);
+ if(!pad)return null;
+ return {
+  steer:Math.abs(pad.axes[0]||0)>.12?pad.axes[0]:0,
+  gas:(pad.buttons[7]?.value||0),
+  brake:(pad.buttons[6]?.value||0),
+  hand:pad.buttons[0]?.pressed||false
+ };
+}
+
+function update(dt){
+ if(!started)return;
+ raceTime+=dt;
+ const pad=gamepad();
+
+ let steer=(keys.a||keys.arrowleft||touch.left? -1:0)+
+ (keys.d||keys.arrowright||touch.right?1:0);
+ let throttle=keys.w||keys.arrowup||touch.gas?1:0;
+ let brake=keys.s||keys.arrowdown||touch.brake?1:0;
+ let hand=keys[' '];
+
+ if(pad){
+  steer=pad.steer||steer;
+  throttle=Math.max(throttle,pad.gas);
+  brake=Math.max(brake,pad.brake);
+  hand=hand||pad.hand;
+ }
+
+ const max=settings.max;
+ if(throttle)speed+=settings.accel*dt;
+ else speed-=3*dt;
+ if(brake)speed-=settings.accel*1.3*dt;
+ if(hand)speed-=settings.accel*.7*dt;
+ speed=THREE.MathUtils.clamp(speed,0,max);
+
+ const speedRatio=speed/max;
+ lane+=steer*dt*(7+speedRatio*9);
+ lane=THREE.MathUtils.clamp(lane,-5.5,5.5);
+
+ const drift=hand?.65:1;
+ angle+=speedRatio*dt*.62*(1-steer*.06);
+ const p=trackPoint(angle,lane);
+ const tangent=trackPoint(angle+.001,lane).sub(trackPoint(angle-.001,lane)).normalize();
+ player.position.set(p.x,0,p.z);
+ player.rotation.y=Math.atan2(tangent.x,tangent.z)-steer*speedRatio*.22*drift;
+
+ // Lap counter
+ let current=angle%(Math.PI*2);
+ if(current<0)current+=Math.PI*2;
+ if(lastAngle>5.5&&current<.5){
+  lap++;
+  if(lap>totalLaps){
+   lap=totalLaps;
+   started=false;
+   document.getElementById('message').textContent='RACE FINISHED!';
+   document.getElementById('status').textContent='FINISHED';
+  }
+ }
+ lastAngle=current;
+
+ // AI cars
+ ai.forEach((a,i)=>{
+  a.t+=dt*(a.speed/max)*.62;
+  setCar(a.car,a.t,a.lane);
+ });
+
+ // Position calculation
+ let position=1;
+ ai.forEach(a=>{
+  let diff=(a.t-angle)%(Math.PI*2);
+  if(diff<0)diff+=Math.PI*2;
+  if(diff>Math.PI)diff-=Math.PI*2;
+  if(diff<0)position++;
+ });
+ document.getElementById('position').textContent=`POSITION: ${position}/6`;
+ document.getElementById('lap').textContent=`LAP: ${Math.min(lap,totalLaps)}/${totalLaps}`;
+ document.getElementById('speed').textContent=`${Math.round(speed*2.1)} MPH`;
+
+ // Camera chase
+ const behind=new THREE.Vector3(0,5.5,-11).applyAxisAngle(new THREE.Vector3(0,1,0),player.rotation.y);
+ const desired=player.position.clone().add(behind);
+ camera.position.lerp(desired,1-Math.exp(-4*dt));
+ camera.lookAt(player.position.clone().add(new THREE.Vector3(0,1.2,0)));
+}
+
+function initialCamera(){
+ camera.position.set(0,13,-24);
+ camera.lookAt(0,0,0);
+}
+
+initialCamera();
+const clock=new THREE.Clock();
+
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.04);
+ update(dt);
+ if(started&&player){
+  // Keep camera close to the car
+ } 
+ renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
